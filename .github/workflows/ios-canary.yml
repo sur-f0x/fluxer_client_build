@@ -1,60 +1,39 @@
-name: iOS Canary IPA Build(unsigned)
+name: Build Unsigned Fluxer IPA
 
 on:
   workflow_dispatch:
 
 jobs:
-  build-and-upload:
-    name: Build and upload to Artifacts
-    runs-on: macos-26
-    env:
-      LANG: en_US.UTF-8
-      LC_ALL: en_US.UTF-8
-      LANGUAGE: en_US.UTF-8
+  build-ios:
+    runs-on: macos-latest
+
     steps:
-      - name: Clone from Official Fluxer Client repository
+      - name: Checkout
         uses: actions/checkout@v4
         with:
-          repository: fluxerapp/flutter_client
-          ref: "canary"
           submodules: recursive
 
-      - name: Clone this repository
-        run: git clone https://github.com/$GITHUB_REPOSITORY.git patch
-
-      - name: Set up Flutter
-        # Temp use while waiting for a pr: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2
-        uses: axi92/flutter-action@72633a794ba0b23276fa4fc465a6cacb758a90c5
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
         with:
           channel: stable
-      - name: Restore pub cache
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
-        with:
-          path: ~/.pub-cache
-          key: ${{ runner.os }}-pub-${{ hashFiles('**/pubspec.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-pub-
 
-      - name: Get dependencies
+      - name: Flutter Pub Get
         run: flutter pub get
 
-      - name: Patch spoof platform
-        run: patch -p1 -i patch/platform_spoof.patch lib/core/api/fluxer_client_properties.dart
+      - name: Build iOS (No Codesign)
+        run: flutter build ios --release --no-codesign
 
-      - name: Run build_runner
-        run: dart run build_runner build
-
-      - name: Build
-        run: flutter build ios --release --flavor canary --no-codesign --dart-define-from-file=tool/dart_defines/canary.json --dart-define=PUSH_PROVIDER=apns
-
-      - name: Packaging ipa
+      - name: Create IPA
         run: |
-          mkdir -p Payload
-          cp -r build/ios/iphoneos/Runner.app Payload/
-          zip -r FluxerCanary.ipa Payload
+          mkdir Payload
+          cp -R build/ios/iphoneos/Runner.app Payload/
 
-      - name: Upload to Artifact
+          cd .
+          zip -r Fluxer-unsigned.ipa Payload
+
+      - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:
-          name: FluxerCanary
-          path: FluxerCanary.ipa
+          name: Fluxer-unsigned-ipa
+          path: Fluxer-unsigned.ipa
