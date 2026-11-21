@@ -12,7 +12,13 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: recursive
-
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+      
+      - name: Add Rust Targets
+        run: |
+          rustup target add aarch64-apple-ios
+          rustup target add aarch64-apple-ios-sim
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
@@ -20,9 +26,15 @@ jobs:
 
       - name: Flutter Pub Get
         run: flutter pub get
-
-      - name: Build iOS (No Codesign)
-        run: flutter build ios --release --no-codesign
+      - name: Build iOS
+        run: |
+          flutter build ios \
+            --release \
+            --flavor beta \
+            --no-codesign \
+            --dart-define-from-file=tool/dart_defines/beta.json \
+            --dart-define=PUSH_PROVIDER=apns \
+            -v
 
       - name: Create IPA
         run: |
