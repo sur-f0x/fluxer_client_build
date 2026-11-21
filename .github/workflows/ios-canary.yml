@@ -1,51 +1,88 @@
-name: Build Unsigned Fluxer IPA
+name: Build Fluxer iOS (unsigned IPA)
 
 on:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   build-ios:
-    runs-on: macos-latest
+    runs-on: macos-26
+    timeout-minutes: 90
 
     steps:
-      - name: Checkout
+      - name: Checkout Fluxer with submodules
         uses: actions/checkout@v4
         with:
           submodules: recursive
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-      
-      - name: Add Rust Targets
-        run: |
-          rustup target add aarch64-apple-ios
-          rustup target add aarch64-apple-ios-sim
-      - name: Setup Flutter
+          fetch-depth: 1
+
+      - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
           channel: stable
+          flutter-version: '3.50.1'
+          cache: true
 
-      - name: Flutter Pub Get
-        run: flutter pub get
-      - name: Build iOS
+      - name: Set up Rust for iOS native assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustup target add aarch64-apple-ios
+          flutter config --enable-native-assets
+
+      - name: Show build environment
+        run: |
+          flutter --version
+          dart --version
+          xcodebuild -version
+          pod --version
+          rustc --version
+          cargo --version
+
+      - name: Configure Fluxer iOS dependencies
+        run: |
+          dart tool/configure_build.dart --profile=ios-store
+          flutter pub get
+
+      - name: Generate Dart source code
+        run: dart run build_runner build --delete-conflicting-outputs
+
+      - name: Build unsigned iOS app (canary)
         run: |
           flutter build ios \
             --release \
-            --flavor beta \
             --no-codesign \
-            --dart-define-from-file=tool/dart_defines/beta.json \
-            --dart-define=PUSH_PROVIDER=apns \
-            -v
+            --flavor canary \
+            --dart-define-from-file=tool/dart_defines/canary.json \
+            --dart-define=PUSH_PROVIDER=apns
 
-      - name: Create IPA
+      - name: Package unsigned IPA
+        shell: bash
         run: |
-          mkdir Payload
-          cp -R build/ios/iphoneos/Runner.app Payload/
+          set -euo pipefail
+          APP_PATH="$(find build/ios/iphoneos -maxdepth 1 -name '*.app' -type d -print -quit)"
+          if [[ -z "$APP_PATH" ]]; then
+            echo 'No built .app found under build/ios/iphoneos' >&2
+            exit 1
+          fi
+          mkdir -p "$RUNNER_TEMP/fluxer-ipa/Payload"
+          cp -R "$APP_PATH" "$RUNNER_TEMP/fluxer-ipa/Payload/"
+          (
+            cd "$RUNNER_TEMP/fluxer-ipa"
+            zip -qry -y "$GITHUB_WORKSPACE/Fluxer-canary-unsigned.ipa" Payload
+          )
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP_PATH/Info.plist"
+          unzip -t "$GITHUB_WORKSPACE/Fluxer-canary-unsigned.ipa" | tail -n 1
+          ls -lh "$GITHUB_WORKSPACE/Fluxer-canary-unsigned.ipa"
 
-          cd .
-          zip -r Fluxer-unsigned.ipa Payload
-
-      - name: Upload IPA
+      - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Fluxer-unsigned-ipa
-          path: Fluxer-unsigned.ipa
+          name: Fluxer-canary-unsigned-IPA
+          path: Fluxer-canary-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 14
